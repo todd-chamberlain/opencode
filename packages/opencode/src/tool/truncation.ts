@@ -1,21 +1,18 @@
-import fs from "fs/promises"
 import path from "path"
-import { Global } from "../global"
-import { Identifier } from "../id/id"
 import { PermissionNext } from "../permission/next"
+import { TRUNCATION_DIR } from "./truncation-dir"
 import type { Agent } from "../agent/agent"
-import { Scheduler } from "../scheduler"
 import { Filesystem } from "../util/filesystem"
-import { Glob } from "../util/glob"
 import { ToolID } from "./schema"
+import { TruncateService } from "./truncate-service"
+import { runtime } from "@/effect/runtime"
+
 
 export namespace Truncate {
   export const MAX_LINES = 2000
   export const MAX_BYTES = 50 * 1024
-  export const DIR = path.join(Global.Path.data, "tool-output")
-  export const GLOB = path.join(DIR, "*")
-  const RETENTION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-  const HOUR_MS = 60 * 60 * 1000
+  export const DIR = TRUNCATION_DIR
+  export const GLOB = path.join(TRUNCATION_DIR, "*")
 
   export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputPath: string }
 
@@ -25,22 +22,8 @@ export namespace Truncate {
     direction?: "head" | "tail"
   }
 
-  export function init() {
-    Scheduler.register({
-      id: "tool.truncation.cleanup",
-      interval: HOUR_MS,
-      run: cleanup,
-      scope: "global",
-    })
-  }
-
   export async function cleanup() {
-    const cutoff = Identifier.timestamp(Identifier.create("tool", false, Date.now() - RETENTION_MS))
-    const entries = await Glob.scan("tool_*", { cwd: DIR, include: "file" }).catch(() => [] as string[])
-    for (const entry of entries) {
-      if (Identifier.timestamp(entry) >= cutoff) continue
-      await fs.unlink(path.join(DIR, entry)).catch(() => {})
-    }
+    return runtime.runPromise(TruncateService.use((s) => s.cleanup()))
   }
 
   function hasTaskTool(agent?: Agent.Info): boolean {

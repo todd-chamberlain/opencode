@@ -11,7 +11,6 @@ import { VcsService } from "./vcs"
 import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
 import { Snapshot } from "../snapshot"
-import { Truncate } from "../tool/truncation"
 import { runPromiseInstance } from "@/effect/runtime"
 
 export async function InstanceBootstrap() {
@@ -24,7 +23,6 @@ export async function InstanceBootstrap() {
   File.init()
   await runPromiseInstance(VcsService.use((s) => s.init()))
   Snapshot.init()
-  Truncate.init()
 
   Bus.subscribe(Command.Event.Executed, async (payload) => {
     if (payload.properties.name === Command.Default.INIT) {
