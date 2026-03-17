@@ -49,7 +49,7 @@ export class FormatService extends ServiceMap.Service<FormatService, FormatServi
     Effect.gen(function* () {
       const instance = yield* InstanceContext
 
-      const enabled: Record<string, boolean> = {}
+      const enabled: Record<string, string[] | false> = {}
       const formatters: Record<string, Formatter.Info> = {}
 
       const cfg = yield* Effect.promise(() => Config.get())
@@ -64,14 +64,11 @@ export class FormatService extends ServiceMap.Service<FormatService, FormatServi
             continue
           }
           const result = mergeDeep(formatters[name] ?? {}, {
-            command: [],
             extensions: [],
             ...item,
           }) as Formatter.Info
 
-          if (result.command.length === 0) continue
-
-          result.enabled = async () => true
+          result.enabled = async () => item.command ?? false
           result.name = name
           formatters[name] = result
         }
@@ -80,22 +77,23 @@ export class FormatService extends ServiceMap.Service<FormatService, FormatServi
       }
 
       async function isEnabled(item: Formatter.Info) {
-        let status = enabled[item.name]
-        if (status === undefined) {
-          status = await item.enabled()
-          enabled[item.name] = status
+        let cmd = enabled[item.name]
+        if (cmd === undefined) {
+          cmd = await item.enabled()
+          enabled[item.name] = cmd
         }
-        return status
+        return cmd
       }
 
       async function getFormatter(ext: string) {
-        const result = []
+        const result: { item: Formatter.Info; cmd: string[] }[] = []
         for (const item of Object.values(formatters)) {
           log.info("checking", { name: item.name, ext })
           if (!item.extensions.includes(ext)) continue
-          if (!(await isEnabled(item))) continue
+          const cmd = await isEnabled(item)
+          if (!cmd) continue
           log.info("enabled", { name: item.name, ext })
-          result.push(item)
+          result.push({ item, cmd })
         }
         return result
       }
@@ -107,11 +105,11 @@ export class FormatService extends ServiceMap.Service<FormatService, FormatServi
           log.info("formatting", { file })
           const ext = path.extname(file)
 
-          for (const item of await getFormatter(ext)) {
-            log.info("running", { command: item.command })
+          for (const { item, cmd } of await getFormatter(ext)) {
+            log.info("running", { command: cmd })
             try {
               const proc = Process.spawn(
-                item.command.map((x) => x.replace("$FILE", file)),
+                cmd.map((x) => x.replace("$FILE", file)),
                 {
                   cwd: instance.directory,
                   env: { ...process.env, ...item.environment },
@@ -122,13 +120,13 @@ export class FormatService extends ServiceMap.Service<FormatService, FormatServi
               const exit = await proc.exited
               if (exit !== 0)
                 log.error("failed", {
-                  command: item.command,
+                  command: cmd,
                   ...item.environment,
                 })
             } catch (error) {
               log.error("failed to format file", {
                 error,
-                command: item.command,
+                command: cmd,
                 ...item.environment,
                 file,
               })
@@ -145,11 +143,11 @@ export class FormatService extends ServiceMap.Service<FormatService, FormatServi
       const status = Effect.fn("FormatService.status")(function* () {
         const result: Format.Status[] = []
         for (const formatter of Object.values(formatters)) {
-          const isOn = yield* Effect.promise(() => isEnabled(formatter))
+          const cmd = yield* Effect.promise(() => isEnabled(formatter))
           result.push({
             name: formatter.name,
             extensions: formatter.extensions,
-            enabled: isOn,
+            enabled: !!cmd,
           })
         }
         return result
